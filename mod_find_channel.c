@@ -61,6 +61,8 @@ typedef struct stream_format stream_format;
 
 struct holder {
 	char * delim;
+	char * var_name;
+	char * var_value;
 	switch_stream_handle_t *stream;
 	uint32_t count;
 	int print_title;
@@ -75,10 +77,21 @@ static int find_channel_callback(void *pArg, int argc, char **argv, char **colum
 {
 	struct holder *holder = (struct holder *) pArg;
 	int x;
+	switch_core_session_t *psession = NULL;
 
-	for (x = 0; x < argc; x++) {
-		char *val = switch_str_nil(argv[x]);
-		holder->stream->write_function(holder->stream, "%s%s", val, x == (argc - 1) ? "\n" : holder->delim);
+	char *uuid = switch_str_nil(argv[0]);
+	if ((psession = switch_core_session_locate(uuid))) {
+		switch_channel_t *channel = switch_core_session_get_channel(psession);
+		const char *value = switch_channel_get_variable(channel, holder->var_name);
+		if (value) {
+			holder->stream->write_function(holder->stream, "Compare: %s = %s ? %s\n", holder->var_name, holder->var_value, value);
+			if (strcasecmp(value, holder->var_value) == 0) {
+				for (x = 0; x < argc ; x++) {
+					char *val = switch_str_nil(argv[x]);
+					holder->stream->write_function(holder->stream, "%s%s", val, x == (argc - 1) ? "\n" : holder->delim);
+				}
+			}
+		}
 	}
 
 	holder->count++;
@@ -101,7 +114,6 @@ static switch_status_t do_config(switch_bool_t reload)
 SWITCH_STANDARD_API(find_channel_function)
 {
 	char *errmsg = NULL;
-	char *command = NULL;
 	switch_cache_db_handle_t *db;
 	struct holder holder = { 0 };
 	char sql[1024];
@@ -119,10 +131,11 @@ SWITCH_STANDARD_API(find_channel_function)
 
 	if (cmd && *cmd && (mydata = strdup(cmd))) {
 		switch_separate_string(mydata, ' ', argv, (sizeof(argv) / sizeof(argv[0])));
-		command = argv[0];
+		holder.var_name = argv[0];
+		holder.var_value = argv[1];
 	}
 
-	if (!command) {
+	if (!holder.var_name && !holder.var_value) {
 		stream->write_function(stream, "-USAGE: %s\n", FIND_CHANNEL_SYNTAX);
 		goto end;
 	}
